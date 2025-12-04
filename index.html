@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <!-- PWA мета-теги -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BitChat">
+  <meta name="application-name" content="BitChat Web">
+  <meta name="theme-color" content="#0a0a0f">
+  <meta name="mobile-web-app-capable" content="yes">
+
+  <!-- SEO и описание -->
+  <meta name="description" content="Децентрализованный P2P чат с end-to-end шифрованием. Работает в локальной сети без интернета.">
+  <meta name="keywords" content="chat, p2p, mesh, encrypted, decentralized, offline">
+
+  <title>BitChat Web - Децентрализованный P2P Чат</title>
+
+  <!-- Манифест PWA -->
+  <link rel="manifest" href="/manifest.json">
+
+  <!-- Иконки -->
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/icon.svg">
+
+  <!-- Стили -->
+  <link rel="stylesheet" href="/src/styles/main.css">
+
+  <!-- Предзагрузка шрифтов -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+</head>
+<body>
+  <!-- Экран загрузки -->
+  <div id="app">
+    <div style="display: flex; align-items: center; justify-content: center; height: 100dvh; flex-direction: column; gap: 20px; background: #0a0a0f;">
+      <div style="font-size: 48px;">🔗</div>
+      <div style="color: #00d4aa; font-size: 24px; font-family: monospace;">BitChat Web</div>
+      <div style="color: #888; font-family: monospace;">Загрузка...</div>
+      <div id="offlineWarning" style="display: none; color: #ffa502; font-size: 12px; text-align: center; padding: 10px;">
+        Нет подключения к серверу.<br>Работаем в офлайн-режиме.
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { BitChatApp } from '/src/components/app.js';
+
+    // Регистрация Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', async () => {
+        try {
+          const registration = await navigator.serviceWorker.register('/sw.js');
+          console.log('[PWA] Service Worker зарегистрирован:', registration.scope);
+
+          // Проверяем обновления
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // Новая версия доступна
+                console.log('[PWA] Доступна новая версия приложения');
+                if (confirm('Доступна новая версия BitChat. Обновить?')) {
+                  window.location.reload();
+                }
+              }
+            });
+          });
+        } catch (error) {
+          console.error('[PWA] Ошибка регистрации Service Worker:', error);
+        }
+      });
+    }
+
+    // Отслеживание статуса сети
+    window.addEventListener('online', () => {
+      const warning = document.getElementById('offlineWarning');
+      if (warning) warning.style.display = 'none';
+      console.log('[PWA] Соединение восстановлено');
+    });
+
+    window.addEventListener('offline', () => {
+      const warning = document.getElementById('offlineWarning');
+      if (warning) warning.style.display = 'block';
+      console.log('[PWA] Работаем офлайн');
+    });
+
+    // Обработка установки PWA
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      console.log('[PWA] Приложение можно установить');
+
+      // Показываем кнопку установки после загрузки
+      setTimeout(() => {
+        if (deferredPrompt && window.bitchat) {
+          window.bitchat.showInstallPrompt?.();
+        }
+      }, 5000);
+    });
+
+    window.installPWA = async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log('[PWA] Результат установки:', outcome);
+        deferredPrompt = null;
+      }
+    };
+
+    // Инициализация приложения
+    window.bitchat = new BitChatApp();
+  </script>
+</body>
+</html>
