@@ -137,6 +137,12 @@ export class BitChatApp {
         this.fileTransfers.delete(e.detail.transferId);
       });
 
+      this.mesh.addEventListener('ice-failed', (e) => {
+        const peer = this.mesh.knownPeers.get(e.detail.peerId);
+        const name = peer?.nickname || e.detail.peerId.substring(0, 8);
+        console.warn(`[App] Прямое соединение с ${name} не удалось, работаем через relay`);
+      });
+
       this.mesh.addEventListener('message-delivered', (e) => {
         this.markMessageDelivered(e.detail.messageId);
       });
@@ -192,7 +198,7 @@ export class BitChatApp {
             <span class="channel-icon">📡</span>
             <div>
               <div class="channel-name">#mesh</div>
-              <div class="channel-description">Локальная mesh-сеть • P2P • Шифрование</div>
+              <div class="channel-description">P2P mesh-сеть • WebRTC • Шифрование</div>
             </div>
           </div>
         </header>
@@ -422,6 +428,36 @@ export class BitChatApp {
         this.addSystemMessage(`Твой fingerprint: ${this.mesh.fingerprint}`);
         break;
 
+      case 'server':
+        if (args[0]) {
+          this.mesh.setSignalingUrl(args[0]);
+          this.addSystemMessage(`Signaling-сервер установлен: ${args[0]}`);
+          this.addSystemMessage('Перезагрузите страницу для переподключения');
+        } else {
+          const config = this.mesh.getNetworkConfig();
+          this.addSystemMessage(`Текущий signaling-сервер: ${config.signalingUrl}`);
+          if (config.turnServer) {
+            this.addSystemMessage(`TURN-сервер: ${config.turnServer.urls}`);
+          } else {
+            this.addSystemMessage('TURN-сервер: не настроен (только STUN)');
+          }
+        }
+        break;
+
+      case 'turn':
+        if (args[0]) {
+          const turnUrl = args[0];
+          const turnUser = args[1] || '';
+          const turnPass = args[2] || '';
+          this.mesh.setTurnServer(turnUrl, turnUser, turnPass);
+          this.addSystemMessage(`TURN-сервер установлен: ${turnUrl}`);
+          this.addSystemMessage('Перезагрузите страницу для применения');
+        } else {
+          this.mesh.setTurnServer(null);
+          this.addSystemMessage('TURN-сервер сброшен');
+        }
+        break;
+
       case 'help':
         this.addSystemMessage('Доступные команды:');
         this.addSystemMessage('  /nick <имя> - сменить никнейм');
@@ -430,6 +466,8 @@ export class BitChatApp {
         this.addSystemMessage('  /slap <ник> - шлёпнуть форелью');
         this.addSystemMessage('  /me <действие> - действие от третьего лица');
         this.addSystemMessage('  /fingerprint - показать свой fingerprint');
+        this.addSystemMessage('  /server [url] - показать/сменить signaling-сервер');
+        this.addSystemMessage('  /turn <url> [user] [pass] - настроить TURN-сервер');
         this.addSystemMessage('  /clear - очистить чат');
         break;
 

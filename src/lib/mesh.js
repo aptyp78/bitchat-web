@@ -15,9 +15,14 @@ import {
 } from './crypto.js';
 
 // Конфигурация WebRTC
-// В локальной сети STUN не нужен - устройства видят друг друга напрямую
+// STUN-серверы для определения внешнего IP (NAT traversal через интернет)
 const RTC_CONFIG = {
-  iceServers: []
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' }
+  ]
 };
 
 // Максимальный TTL для сообщений
@@ -26,8 +31,39 @@ const MAX_TTL = 7;
 // Размер чанка для передачи файлов (16KB)
 const FILE_CHUNK_SIZE = 16384;
 
+// Загрузка пользовательского TURN-сервера из localStorage
+function loadTurnConfig() {
+  const stored = localStorage.getItem('bitchat_turn');
+  if (stored) {
+    try {
+      const turn = JSON.parse(stored);
+      if (turn.urls) {
+        return turn;
+      }
+    } catch (e) {
+      // Повреждённые данные — игнорируем
+    }
+  }
+  return null;
+}
+
+// Собирает конфиг WebRTC с учётом пользовательского TURN
+function getRtcConfig() {
+  const config = { iceServers: [...RTC_CONFIG.iceServers] };
+  const turn = loadTurnConfig();
+  if (turn) {
+    config.iceServers.push(turn);
+  }
+  return config;
+}
+
 // Автоматическое определение адреса signaling сервера
 function getSignalingUrl() {
+  // Сначала проверяем сохранённый адрес
+  const saved = localStorage.getItem('bitchat_signaling_url');
+  if (saved) {
+    return saved;
+  }
   const host = window.location.hostname;
   const port = 3001;
   const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
@@ -195,8 +231,11 @@ export class BitChatMesh extends EventTarget {
   async _initiateConnection(targetPeerId) {
     if (this.peers.has(targetPeerId)) return;
 
-    const connection = new RTCPeerConnection(RTC_CONFIG);
+    const connection = new RTCPeerConnection(getRtcConfig());
     const peer = this.knownPeers.get(targetPeerId);
+
+    // Мониторинг ICE-состояния
+    this._monitorConnection(connection, targetPeerId);
 
     // Создаём data channel
     const dataChannel = connection.createDataChannel('bitchat', {
@@ -239,8 +278,11 @@ export class BitChatMesh extends EventTarget {
    * Обрабатывает входящий offer
    */
   async _handleOffer(offer, fromPeerId) {
-    const connection = new RTCPeerConnection(RTC_CONFIG);
+    const connection = new RTCPeerConnection(getRtcConfig());
     const peer = this.knownPeers.get(fromPeerId);
+
+    // Мониторинг ICE-состояния
+    this._monitorConnection(connection, fromPeerId);
 
     connection.ondatachannel = (event) => {
       this._setupDataChannel(event.channel, fromPeerId, peer);
@@ -790,6 +832,64 @@ export class BitChatMesh extends EventTarget {
         }
       }
     }
+  }
+
+  /**
+   * Мониторинг состояния ICE-соединения
+   */
+  _monitorConnection(connection, peerId) {
+    connection.oniceconnectionstatechange = () => {
+      const state = connection.iceConnectionState;
+      console.log(`[BitChat] ICE состояние с ${peerId.substring(0, 8)}: ${state}`);
+
+      if (state === 'failed') {
+        console.warn(`[BitChat] ICE соединение не удалось с ${peerId.substring(0, 8)}. Используется relay через сервер.`);
+        this._emit('ice-failed', { peerId });
+      }
+
+      if (state === 'disconnected' || state === 'closed') {
+        const peer = this.peers.get(peerId);
+        if (peer) {
+          peer.state = 'disconnected';
+        }
+      }
+    };
+  }
+
+  /**
+   * Устанавливает адрес signaling-сервера (для работы через интернет)
+   */
+  setSignalingUrl(url) {
+    if (url) {
+      localStorage.setItem('bitchat_signaling_url', url);
+    } else {
+      localStorage.removeItem('bitchat_signaling_url');
+    }
+  }
+
+  /**
+   * Устанавливает TURN-сервер (для NAT traversal через интернет)
+   */
+  setTurnServer(urls, username, credential) {
+    if (urls) {
+      const turn = { urls };
+      if (username) turn.username = username;
+      if (credential) turn.credential = credential;
+      localStorage.setItem('bitchat_turn', JSON.stringify(turn));
+    } else {
+      localStorage.removeItem('bitchat_turn');
+    }
+  }
+
+  /**
+   * Возвращает текущие настройки сети
+   */
+  getNetworkConfig() {
+    return {
+      signalingUrl: this.signalingUrl,
+      turnServer: loadTurnConfig(),
+      rtcConfig: getRtcConfig()
+    };
   }
 
   /**
